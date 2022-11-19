@@ -16,6 +16,7 @@ disabled=no
 images=no
 videos=yes
 audio=yes
+ignore_hidden=yes
 
 --]]
 
@@ -29,7 +30,8 @@ o = {
     disabled = false,
     images = false,
     videos = true,
-    audio = true
+    audio = true,
+    ignore_hidden = false
 }
 options.read_options(o)
 
@@ -47,15 +49,23 @@ function SetUnion (a,b)
 end
 
 EXTENSIONS_VIDEO = Set {
-    '3g2', '3gp', '3gp2', '3gpp', 'amr', 'amv', 'asf', 'avi', 'divx', 'dpg', 'dvr-ms', 'evo', 'f4v', 'flv', 'ifo', 'k3g', 'm1v', 'm2t', 'm2ts', 'm2v', 'm4b', 'm4p', 'm4v', 'mkv', 'mov', 'mp2v', 'mp4', 'mpe', 'mpeg', 'mpg', 'mpv2', 'mts', 'mxf', 'nsr', 'nsv', 'ogv', 'qt', 'ram', 'rm', 'rmvb', 'rpm', 'skm', 'swf', 'tp', 'tpr', 'trp', 'ts', 'vob', 'webm', 'wm', 'wmp', 'wmv', 'wtv'
-	}
+    '3g2', '3gp', '3gp2', '3gpp', 'amr', 'amv', 'asf', 'avi', 'divx', 'dpg',
+    'dvr-ms', 'evo', 'f4v', 'flv', 'ifo', 'k3g', 'm1v', 'm2t', 'm2ts', 'm2v',
+    'm4b', 'm4p', 'm4v', 'mj2', 'mkv', 'mov', 'mp2v', 'mp4', 'mpe', 'mpeg',
+    'mpg', 'mpv2', 'mts', 'mxf', 'nsr', 'nsv', 'ogv', 'qt', 'ram', 'rm',
+    'rmvb', 'rpm', 'skm', 'swf', 'tp', 'tpr', 'trp', 'ts', 'vob', 'webm',
+    'wm', 'wmp', 'wmv', 'wtv', 'y4m'
+}
 
 EXTENSIONS_AUDIO = Set {
-    'aac', 'ac3', 'aiff', 'ape', 'cda', 'dsf', 'dts', 'dtshd', 'eac3', 'flac', 'm1a', 'm2a', 'm4a', 'mka', 'mod', 'mp2', 'mp3', 'mpa', 'mpc', 'ogg', 'ogm', 'opus', 'ra', 'tak', 'tta', 'wav', 'wma', 'wv'
+    'aac', 'ac3', 'aiff', 'ape', 'au', 'cda', 'dsf', 'dts', 'dtshd', 'eac3',
+    'flac', 'm1a', 'm2a', 'm4a', 'mka', 'mod', 'mp2', 'mp3', 'mpa', 'mpc',
+    'oga', 'ogg', 'ogm', 'opus', 'ra', 'tak', 'tta', 'wav', 'wma', 'wv'
 }
 
 EXTENSIONS_IMAGES = Set {
-    'jpg', 'jpeg', 'png', 'tif', 'tiff', 'gif', 'webp', 'svg', 'bmp'
+    'avif', 'bmp', 'gif', 'j2k', 'jp2', 'jpeg', 'jpg', 'jxl', 'png', 'svg',
+    'tga', 'tif', 'tiff', 'webp'
 }
 
 EXTENSIONS = Set {}
@@ -122,6 +132,16 @@ end
 
 local autoloaded = nil
 
+function get_playlist_filenames()
+  local filenames = {}
+  for n = 0, pl_count - 1, 1 do
+    local filename = mp.get_property('playlist/'..n..'/filename')
+    local _, file = utils.split_path(filename)
+    filenames[file] = true
+  end
+  return filenames
+end
+
 function find_and_add_entries()
     local path = mp.get_property("path", "")
     local dir, filename = utils.split_path(path)
@@ -134,7 +154,7 @@ function find_and_add_entries()
         return
     end
 
-    local pl_count = mp.get_property_number("playlist-count", 1)
+    pl_count = mp.get_property_number("playlist-count", 1)
     -- check if this is a manually made playlist
     if (pl_count > 1 and autoloaded == nil) or
        (pl_count == 1 and EXTENSIONS[string.lower(get_extension(filename))] == nil) then
@@ -155,7 +175,9 @@ function find_and_add_entries()
         return
     end
     table.filter(files, function (v, k)
-        if string.match(v, "^%.") then
+        -- The current file could be a hidden file, ignoring it doesn't load other
+        -- files from the current directory.
+        if (o.ignore_hidden and not (v == filename) and string.match(v, "^%.")) then
             return false
         end
         local ext = get_extension(v)
@@ -184,22 +206,17 @@ function find_and_add_entries()
     msg.trace("current file position in files: "..current)
 
     local append = {[-1] = {}, [1] = {}}
+    local filenames = get_playlist_filenames()
     for direction = -1, 1, 2 do -- 2 iterations, with direction = -1 and +1
         for i = 1, MAXENTRIES do
             local file = files[current + i * direction]
-            local pl_e = pl[pl_current + i * direction]
             if file == nil or file[1] == "." then
                 break
             end
 
             local filepath = dir .. file
-            if pl_e then
-                -- If there's a playlist entry, and it's the same file, stop.
-                msg.trace(pl_e.filename.." == "..filepath.." ?")
-                if pl_e.filename == filepath then
-                    break
-                end
-            end
+            -- skip files already in playlist
+            if filenames[file] then break end
 
             if direction == -1 then
                 if pl_current == 1 then -- never add additional entries in the middle
